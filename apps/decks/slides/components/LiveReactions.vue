@@ -14,8 +14,6 @@ enum ConnectionState {
 enum SendType {
 	Reactions = 'reactions',
 	SlideUpdate = 'slideupdate',
-	Ping = 'ping',
-	Pong = 'pong',
 }
 
 interface SlideUpdateState {
@@ -32,18 +30,6 @@ interface ReactionState {
 	page: number | string
 	slideTitle: string
 	feedback: FeedbackKey
-}
-
-interface HeartbeatPingState {
-	mtype: SendType.Ping
-	type: 'heartbeat'
-	ts: number
-}
-
-interface HeartbeatPongState {
-	mtype: SendType.Pong
-	type: 'heartbeat'
-	ts: number
 }
 
 interface ConnectedState {
@@ -65,16 +51,18 @@ interface QueuedReaction {
 	payload: ReactionState
 }
 
-const HEARTBEAT_INTERVAL_MS = 10_000
-const STALE_CONNECTION_TIMEOUT_MS = 25_000
-const RECONNECT_DELAY_MAX_MS = 10_000
+const HEARTBEAT_REQUEST = 'ping'
+const HEARTBEAT_RESPONSE = 'pong'
+const HEARTBEAT_INTERVAL_MS = 30_000
+const STALE_CONNECTION_TIMEOUT_MS = 75_000
+const RECONNECT_DELAYS_MS = [2_000, 5_000, 10_000, 20_000] as const
 const REACTION_QUEUE_LIMIT = 10
 const REACTION_QUEUE_TTL_MS = 15_000
 const REACTION_QUEUE_FLUSH_INTERVAL_MS = 120
 const REACTION_TAP_THROTTLE_MS = 180
 
-type OutboundMessage = ReactionState | SlideUpdateState | HeartbeatPingState
-type InboundMessage = ReactionState | SlideUpdateState | HeartbeatPongState | ConnectedState
+type OutboundMessage = ReactionState | SlideUpdateState | string
+type InboundMessage = ReactionState | SlideUpdateState | ConnectedState
 
 const { isPresenter, slides, currentPage, queryClicks, go } = useNav()
 
@@ -245,10 +233,10 @@ function sendPayload(payload: OutboundMessage) {
 		return false
 
 	try {
-		webSocket.send(JSON.stringify(payload))
+		webSocket.send(typeof payload === 'string' ? payload : JSON.stringify(payload))
 		return true
 	} catch {
-		restartConnection({ immediate: true })
+		restartConnection()
 		return false
 	}
 }
@@ -296,6 +284,10 @@ function getNextActiveState() {
 
 function isSocketOpen() {
 	return webSocket?.readyState === WebSocket.OPEN
+}
+
+function isSocketConnecting() {
+	return webSocket?.readyState === WebSocket.CONNECTING
 }
 
 function isConnectionStale(referenceTime = Date.now()) {
@@ -365,13 +357,7 @@ function startHeartbeatLoop() {
 			return
 		}
 
-		if (!sendPayload({
-			mtype: SendType.Ping,
-			type: 'heartbeat',
-			ts: Date.now(),
-		})) {
-			restartConnection({ immediate: true })
-		}
+		sendPayload(HEARTBEAT_REQUEST)
 	}, HEARTBEAT_INTERVAL_MS)
 }
 
@@ -379,7 +365,7 @@ function scheduleReconnect({ immediate = false, nextState = getNextActiveState()
 	if (!canMaintainConnection())
 		return
 
-	if (webSocket && (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING))
+	if (isSocketOpen() || isSocketConnecting())
 		return
 
 	if (!immediate && reconnectTimer !== undefined)
@@ -394,7 +380,7 @@ function scheduleReconnect({ immediate = false, nextState = getNextActiveState()
 
 	const delay = immediate
 		? 0
-		: Math.min(1000 * 2 ** Math.max(0, reconnectAttempts - 1), RECONNECT_DELAY_MAX_MS)
+		: RECONNECT_DELAYS_MS[Math.min(reconnectAttempts - 1, RECONNECT_DELAYS_MS.length - 1)]
 
 	reconnectTimer = window.setTimeout(() => {
 		reconnectTimer = undefined
@@ -428,7 +414,7 @@ function ensureActiveConnection({ immediate = false } = {}) {
 	}
 
 	if (isSocketOpen() && isConnectionStale()) {
-		restartConnection({ immediate: true })
+		restartConnection()
 		return
 	}
 
@@ -508,12 +494,20 @@ function broadcastSlideUpdate() {
 
 function handleMessage(event: MessageEvent<string>) {
 	try {
-		const payload = JSON.parse(event.data) as InboundMessage
+		const raw = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data)
+
+		if (raw === HEARTBEAT_RESPONSE) {
+			markServerActivity()
+			handleConnectionReady()
+			return
+		}
+
+		const payload = JSON.parse(raw) as InboundMessage
 
 		markServerActivity()
 		handleConnectionReady()
 
-		if (payload.type === 'connected' || payload.type === 'heartbeat')
+		if (payload.type === 'connected')
 			return
 
 		if (payload.type !== 'broadcast' || isPresenter.value)
@@ -547,13 +541,9 @@ function connect() {
 		if (webSocket !== socket)
 			return
 
-		lastServerActivityAt = Date.now()
+		markServerActivity()
 		startHeartbeatLoop()
-		sendPayload({
-			mtype: SendType.Ping,
-			type: 'heartbeat',
-			ts: Date.now(),
-		})
+		sendPayload(HEARTBEAT_REQUEST)
 	})
 
 	socket.addEventListener('message', handleMessage as EventListener)

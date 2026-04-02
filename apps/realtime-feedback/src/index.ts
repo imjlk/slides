@@ -5,7 +5,6 @@ import { logger } from 'hono/logger';
 
 type FeedbackType = 'okay' | 'good' | 'great' | 'mindBlown';
 type BroadcastType = 'broadcast';
-type HeartbeatType = 'heartbeat';
 type ConnectedType = 'connected';
 
 interface PresentationEntry {
@@ -37,8 +36,6 @@ interface SessionState {
 enum SendType {
 	REACTIONS = 'reactions',
 	SLIDEUPDATE = 'slideupdate',
-	PING = 'ping',
-	PONG = 'pong',
 }
 
 interface SlideUpdateState {
@@ -57,18 +54,6 @@ interface ReactionState {
 	feedback: FeedbackType;
 }
 
-interface HeartbeatPingState {
-	mtype: SendType.PING;
-	type: HeartbeatType;
-	ts: number;
-}
-
-interface HeartbeatPongState {
-	mtype: SendType.PONG;
-	type: HeartbeatType;
-	ts: number;
-}
-
 interface ConnectedState {
 	type: ConnectedType;
 	id: string;
@@ -83,8 +68,10 @@ const FEEDBACK_COLUMNS: Record<FeedbackType, string> = {
 
 const REACTION_RATE_LIMIT_WINDOW_MS = 5000;
 const REACTION_RATE_LIMIT_MAX = 12;
+const HIBERNATION_HEARTBEAT_REQUEST = 'ping';
+const HIBERNATION_HEARTBEAT_RESPONSE = 'pong';
 
-type SocketMessage = ReactionState | SlideUpdateState | HeartbeatPingState | HeartbeatPongState;
+type SocketMessage = ReactionState | SlideUpdateState;
 
 function parseSocketMessage(message: ArrayBuffer | string): SocketMessage | null {
 	try {
@@ -163,6 +150,7 @@ export class Slide extends DurableObject {
 		super(ctx, env);
 		this.session = new Map<WebSocket, SessionState>();
 		this.sql = this.ctx.storage.sql;
+		this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HIBERNATION_HEARTBEAT_REQUEST, HIBERNATION_HEARTBEAT_RESPONSE));
 		this.ctx.getWebSockets().forEach((ws) => {
 			const session = this.normalizeSession(ws.deserializeAttachment() as SessionState | undefined);
 			this.session.set(ws, session);
@@ -282,13 +270,6 @@ export class Slide extends DurableObject {
 		const receivedMessage = parseSocketMessage(message);
 		if (!receivedMessage)
 			return;
-
-		if (receivedMessage.type === 'heartbeat') {
-			if (receivedMessage.mtype === SendType.PING)
-				ws.send(JSON.stringify({ type: 'heartbeat', mtype: SendType.PONG, ts: receivedMessage.ts } satisfies HeartbeatPongState));
-
-			return;
-		}
 
 		const { page, type, mtype } = receivedMessage;
 
