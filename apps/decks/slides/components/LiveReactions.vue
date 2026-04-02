@@ -651,18 +651,20 @@ onUnmounted(() => {
 		>
 			PDF
 		</a>
-		<button
-			v-for="(emoji, key) in emojiMap"
-			:key="key"
-			type="button"
-			class="reaction-button"
-			:data-reaction-key="key"
-			:title="`${key} reaction`"
-			@click="sendReaction(key as FeedbackKey)"
-		>
-			{{ emoji }}
-		</button>
-		<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
+		<div class="reaction-controls">
+			<button
+				v-for="(emoji, key) in emojiMap"
+				:key="key"
+				type="button"
+				class="reaction-button"
+				:data-reaction-key="key"
+				:title="`${key} reaction`"
+				@click="sendReaction(key as FeedbackKey)"
+			>
+				{{ emoji }}
+			</button>
+			<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
+		</div>
 	</div>
 
 	<div v-if="!isBrowserExporterRoute" class="emoji-stage" :data-background-tone="backgroundTone" aria-hidden="true">
@@ -694,6 +696,15 @@ onUnmounted(() => {
 	box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
 }
 
+.reaction-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding-left: 14px;
+	margin-left: 2px;
+	border-left: 1px solid rgba(255, 255, 255, 0.16);
+}
+
 .reaction-button {
 	width: 40px;
 	height: 40px;
@@ -718,7 +729,8 @@ onUnmounted(() => {
 	height: 40px;
 	padding: 0 14px;
 	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.16);
+	background: rgba(255, 255, 255, 0.18);
+	border: 1px solid rgba(255, 255, 255, 0.12);
 	color: white;
 	font-size: 12px;
 	font-weight: 800;
@@ -736,6 +748,10 @@ onUnmounted(() => {
 	.reaction-bar {
 		right: 16px;
 		bottom: 14px;
+	}
+
+	.reaction-controls {
+		padding-left: 12px;
 	}
 }
 
