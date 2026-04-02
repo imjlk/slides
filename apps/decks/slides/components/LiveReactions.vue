@@ -356,6 +356,13 @@ onUnmounted(() => {
 	background: rgba(255, 255, 255, 0.18);
 }
 
+@media (orientation: landscape) and (max-height: 500px) {
+	.reaction-bar {
+		right: 16px;
+		bottom: 14px;
+	}
+}
+
 .reaction-status {
 	padding: 0 10px;
 	font-size: 11px;
@@ -431,6 +438,16 @@ onUnmounted(() => {
 			calc(-42vh / var(--reaction-item-scale, 1))
 		) scale(1.06);
 		opacity: 0;
+	}
+}
+</style>
+
+<style>
+@media (orientation: landscape) and (max-height: 500px) {
+	.slidev-slide-container > .absolute.bottom-0.left-0,
+	.slidev-slide-container > .absolute.bottom-0.left-0 * {
+		pointer-events: none !important;
+		opacity: 0 !important;
 	}
 }
 </style>
