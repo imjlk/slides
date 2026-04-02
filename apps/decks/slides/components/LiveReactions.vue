@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { configs, useNav } from '@slidev/client'
 
 type FeedbackKey = 'okay' | 'good' | 'great' | 'mindBlown'
@@ -37,12 +37,14 @@ interface AnimatedEmoji {
 	emoji: string
 	x: number
 	delay: number
+	scale: number
 }
 
 const { isPresenter, slides, currentPage, queryClicks, go } = useNav()
 
 const socketState = ref<ConnectionState>(ConnectionState.Disconnected)
 const animatedEmojis = ref<AnimatedEmoji[]>([])
+const backgroundTone = ref<'light' | 'dark'>('dark')
 
 let webSocket: WebSocket | undefined
 let emojiCounter = 0
@@ -96,13 +98,60 @@ function getWsUrl() {
 function resolveViewportX(positionX?: number) {
 	const viewportWidth = window.innerWidth
 	const safeRatio = clamp(positionX ?? 0.84, 0.08, 0.92)
-	return safeRatio * viewportWidth
+	return safeRatio * viewportWidth / getCurrentSlideScale()
+}
+
+function parseRgbChannels(color: string) {
+	const match = color.match(/rgba?\(([^)]+)\)/)
+	if (!match)
+		return null
+
+	const [red, green, blue, alpha = '1'] = match[1].split(',').map(value => value.trim())
+	return {
+		r: Number.parseFloat(red),
+		g: Number.parseFloat(green),
+		b: Number.parseFloat(blue),
+		a: Number.parseFloat(alpha),
+	}
+}
+
+function relativeLuminance(channel: number) {
+	const value = channel / 255
+	return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+}
+
+function detectBackgroundTone() {
+	const candidates = [
+		document.querySelector('.slidev-layout') as HTMLElement | null,
+		document.querySelector('.slidev-slide-content') as HTMLElement | null,
+		document.body,
+	]
+
+	for (const element of candidates) {
+		if (!element)
+			continue
+
+		const channels = parseRgbChannels(getComputedStyle(element).backgroundColor)
+		if (!channels || channels.a === 0)
+			continue
+
+		const luminance = 0.2126 * relativeLuminance(channels.r) + 0.7152 * relativeLuminance(channels.g) + 0.0722 * relativeLuminance(channels.b)
+		backgroundTone.value = luminance > 0.72 ? 'light' : 'dark'
+		return
+	}
+
+	backgroundTone.value = 'dark'
+}
+
+function getCurrentSlideScale() {
+	const cssValue = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--slidev-slide-scale'))
+	return Number.isFinite(cssValue) && cssValue > 0 ? cssValue : 1
 }
 
 function addAnimatedEmoji(emoji: string, positionX?: number) {
 	const x = resolveViewportX(positionX)
 	const delay = Math.random() * 500
-	const item = { id: emojiCounter++, emoji, x, delay }
+	const item = { id: emojiCounter++, emoji, x, delay, scale: getCurrentSlideScale() }
 
 	animatedEmojis.value.push(item)
 
@@ -212,7 +261,13 @@ watch([currentPage, queryClicks], () => {
 	broadcastSlideUpdate()
 })
 
+watch(currentPage, async () => {
+	await nextTick()
+	detectBackgroundTone()
+})
+
 onMounted(() => {
+	detectBackgroundTone()
 	connect()
 })
 
@@ -236,12 +291,12 @@ onUnmounted(() => {
 		<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
 	</div>
 
-	<div class="emoji-stage" aria-hidden="true">
+	<div class="emoji-stage" :data-background-tone="backgroundTone" aria-hidden="true">
 		<div
 			v-for="emoji in animatedEmojis"
 			:key="emoji.id"
 			class="animated-emoji"
-			:style="{ left: `${emoji.x}px`, animationDelay: `${emoji.delay}ms` }"
+			:style="{ left: `${emoji.x}px`, animationDelay: `${emoji.delay}ms`, '--reaction-item-scale': String(emoji.scale) }"
 		>
 			{{ emoji.emoji }}
 		</div>
@@ -301,15 +356,44 @@ onUnmounted(() => {
 .emoji-stage {
 	position: fixed;
 	inset: 0;
+	z-index: 1100;
 	pointer-events: none;
 	overflow: hidden;
 }
 
 .animated-emoji {
 	position: absolute;
-	bottom: -48px;
-	font-size: 2rem;
+	bottom: calc(88px / var(--reaction-item-scale, 1));
+	display: grid;
+	place-items: center;
+	width: calc(3.4rem / var(--reaction-item-scale, 1));
+	height: calc(3.4rem / var(--reaction-item-scale, 1));
+	margin-left: calc(-1.7rem / var(--reaction-item-scale, 1));
+	border-radius: 999px;
+	font-size: calc(2rem / var(--reaction-item-scale, 1));
+	text-shadow:
+		0 1px 0 rgba(255, 255, 255, 0.4),
+		0 8px 18px rgba(15, 23, 42, 0.35);
+	background: rgba(15, 23, 42, 0.24);
+	border: 1px solid rgba(255, 255, 255, 0.28);
+	box-shadow:
+		0 18px 30px rgba(15, 23, 42, 0.22),
+		inset 0 1px 0 rgba(255, 255, 255, 0.24);
+	backdrop-filter: blur(10px) saturate(1.1);
 	animation: float-up 2.8s ease-out forwards;
+}
+
+.emoji-stage[data-background-tone='light'] .animated-emoji {
+	background: rgba(15, 23, 42, 0.62);
+	border-color: rgba(255, 255, 255, 0.42);
+	box-shadow:
+		0 18px 34px rgba(15, 23, 42, 0.3),
+		inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.emoji-stage[data-background-tone='dark'] .animated-emoji {
+	background: rgba(255, 255, 255, 0.18);
+	border-color: rgba(255, 255, 255, 0.18);
 }
 
 @keyframes float-up {
@@ -319,11 +403,11 @@ onUnmounted(() => {
 	}
 
 	12% {
-		opacity: 0.9;
+		opacity: 1;
 	}
 
 	100% {
-		transform: translateY(-75vh) scale(1.12);
+		transform: translateY(-68vh) scale(1.08);
 		opacity: 0;
 	}
 }
