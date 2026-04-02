@@ -5,14 +5,17 @@ import { configs, useNav } from '@slidev/client'
 type FeedbackKey = 'okay' | 'good' | 'great' | 'mindBlown'
 
 enum ConnectionState {
+	Connecting = 'connecting',
 	Connected = 'connected',
-	Disconnected = 'disconnected',
-	Error = 'error',
+	Reconnecting = 'reconnecting',
+	Offline = 'offline',
 }
 
 enum SendType {
 	Reactions = 'reactions',
 	SlideUpdate = 'slideupdate',
+	Ping = 'ping',
+	Pong = 'pong',
 }
 
 interface SlideUpdateState {
@@ -29,7 +32,23 @@ interface ReactionState {
 	page: number | string
 	slideTitle: string
 	feedback: FeedbackKey
-	positionX?: number
+}
+
+interface HeartbeatPingState {
+	mtype: SendType.Ping
+	type: 'heartbeat'
+	ts: number
+}
+
+interface HeartbeatPongState {
+	mtype: SendType.Pong
+	type: 'heartbeat'
+	ts: number
+}
+
+interface ConnectedState {
+	type: 'connected'
+	id: string
 }
 
 interface AnimatedEmoji {
@@ -41,17 +60,41 @@ interface AnimatedEmoji {
 	drift: number
 }
 
+interface QueuedReaction {
+	createdAt: number
+	payload: ReactionState
+}
+
+const HEARTBEAT_INTERVAL_MS = 10_000
+const STALE_CONNECTION_TIMEOUT_MS = 25_000
+const RECONNECT_DELAY_MAX_MS = 10_000
+const REACTION_QUEUE_LIMIT = 10
+const REACTION_QUEUE_TTL_MS = 15_000
+const REACTION_QUEUE_FLUSH_INTERVAL_MS = 120
+const REACTION_TAP_THROTTLE_MS = 180
+
+type OutboundMessage = ReactionState | SlideUpdateState | HeartbeatPingState
+type InboundMessage = ReactionState | SlideUpdateState | HeartbeatPongState | ConnectedState
+
 const { isPresenter, slides, currentPage, queryClicks, go } = useNav()
 
-const socketState = ref<ConnectionState>(ConnectionState.Disconnected)
+const socketState = ref<ConnectionState>(ConnectionState.Connecting)
 const animatedEmojis = ref<AnimatedEmoji[]>([])
 const backgroundTone = ref<'light' | 'dark'>('dark')
 
 let webSocket: WebSocket | undefined
 let emojiCounter = 0
+let heartbeatTimer: number | undefined
 let reconnectTimer: number | undefined
+let queueFlushTimer: number | undefined
 let reconnectAttempts = 0
+let lastReactionTapAt = 0
+let lastServerActivityAt = 0
 let isActive = false
+let hasConnectedOnce = false
+let queuedReactions: QueuedReaction[] = []
+
+const intentionallyClosedSockets = new WeakSet<WebSocket>()
 
 const emojiMap = computed(() => {
 	const reactions = configs.liveReactions || {}
@@ -197,11 +240,25 @@ function addAnimatedEmoji(emoji: string, key?: FeedbackKey) {
 	}, 2800)
 }
 
-function sendPayload(payload: ReactionState | SlideUpdateState) {
+function sendPayload(payload: OutboundMessage) {
 	if (!webSocket || webSocket.readyState !== WebSocket.OPEN)
+		return false
+
+	try {
+		webSocket.send(JSON.stringify(payload))
+		return true
+	} catch {
+		restartConnection({ immediate: true })
+		return false
+	}
+}
+
+function clearHeartbeatTimer() {
+	if (heartbeatTimer === undefined)
 		return
 
-	webSocket.send(JSON.stringify(payload))
+	window.clearInterval(heartbeatTimer)
+	heartbeatTimer = undefined
 }
 
 function clearReconnectTimer() {
@@ -210,6 +267,14 @@ function clearReconnectTimer() {
 
 	window.clearTimeout(reconnectTimer)
 	reconnectTimer = undefined
+}
+
+function clearQueueFlushTimer() {
+	if (queueFlushTimer === undefined)
+		return
+
+	window.clearTimeout(queueFlushTimer)
+	queueFlushTimer = undefined
 }
 
 function canMaintainConnection() {
@@ -225,7 +290,92 @@ function canMaintainConnection() {
 	return true
 }
 
-function scheduleReconnect({ immediate = false } = {}) {
+function getNextActiveState() {
+	return hasConnectedOnce ? ConnectionState.Reconnecting : ConnectionState.Connecting
+}
+
+function isSocketOpen() {
+	return webSocket?.readyState === WebSocket.OPEN
+}
+
+function isConnectionStale(referenceTime = Date.now()) {
+	return lastServerActivityAt > 0 && referenceTime - lastServerActivityAt >= STALE_CONNECTION_TIMEOUT_MS
+}
+
+function isSocketHealthy(referenceTime = Date.now()) {
+	return socketState.value === ConnectionState.Connected && isSocketOpen() && !isConnectionStale(referenceTime)
+}
+
+function markServerActivity() {
+	lastServerActivityAt = Date.now()
+}
+
+function pruneQueuedReactions(referenceTime = Date.now()) {
+	queuedReactions = queuedReactions
+		.filter(item => referenceTime - item.createdAt <= REACTION_QUEUE_TTL_MS)
+		.slice(-REACTION_QUEUE_LIMIT)
+}
+
+function flushQueuedReactions() {
+	clearQueueFlushTimer()
+	pruneQueuedReactions()
+
+	if (!queuedReactions.length || !isSocketHealthy())
+		return
+
+	const nextReaction = queuedReactions[0]
+	if (!sendPayload(nextReaction.payload)) {
+		ensureActiveConnection({ immediate: true })
+		return
+	}
+
+	queuedReactions = queuedReactions.slice(1)
+
+	if (queuedReactions.length) {
+		queueFlushTimer = window.setTimeout(() => {
+			queueFlushTimer = undefined
+			flushQueuedReactions()
+		}, REACTION_QUEUE_FLUSH_INTERVAL_MS)
+	}
+}
+
+function enqueueReaction(payload: ReactionState, createdAt = Date.now()) {
+	pruneQueuedReactions(createdAt)
+	queuedReactions.push({ createdAt, payload })
+	pruneQueuedReactions(createdAt)
+}
+
+function startHeartbeatLoop() {
+	clearHeartbeatTimer()
+
+	if (!canMaintainConnection() || !isSocketOpen())
+		return
+
+	heartbeatTimer = window.setInterval(() => {
+		if (!canMaintainConnection()) {
+			goOffline()
+			return
+		}
+
+		if (!isSocketOpen())
+			return
+
+		if (isConnectionStale()) {
+			restartConnection()
+			return
+		}
+
+		if (!sendPayload({
+			mtype: SendType.Ping,
+			type: 'heartbeat',
+			ts: Date.now(),
+		})) {
+			restartConnection({ immediate: true })
+		}
+	}, HEARTBEAT_INTERVAL_MS)
+}
+
+function scheduleReconnect({ immediate = false, nextState = getNextActiveState() }: { immediate?: boolean, nextState?: ConnectionState } = {}) {
 	if (!canMaintainConnection())
 		return
 
@@ -240,9 +390,11 @@ function scheduleReconnect({ immediate = false } = {}) {
 	if (!immediate)
 		reconnectAttempts += 1
 
+	socketState.value = nextState
+
 	const delay = immediate
 		? 0
-		: Math.min(1000 * 2 ** Math.max(0, reconnectAttempts - 1), 10000)
+		: Math.min(1000 * 2 ** Math.max(0, reconnectAttempts - 1), RECONNECT_DELAY_MAX_MS)
 
 	reconnectTimer = window.setTimeout(() => {
 		reconnectTimer = undefined
@@ -250,24 +402,96 @@ function scheduleReconnect({ immediate = false } = {}) {
 	}, delay)
 }
 
+function closeSocket(socket: WebSocket | undefined, nextState: ConnectionState, reconnect = false, immediateReconnect = false) {
+	clearHeartbeatTimer()
+	clearReconnectTimer()
+	clearQueueFlushTimer()
+
+	if (socket)
+		intentionallyClosedSockets.add(socket)
+
+	if (webSocket === socket)
+		webSocket = undefined
+
+	lastServerActivityAt = 0
+	socketState.value = nextState
+	socket?.close()
+
+	if (reconnect)
+		scheduleReconnect({ immediate: immediateReconnect, nextState })
+}
+
+function ensureActiveConnection({ immediate = false } = {}) {
+	if (!canMaintainConnection()) {
+		socketState.value = ConnectionState.Offline
+		return
+	}
+
+	if (isSocketOpen() && isConnectionStale()) {
+		restartConnection({ immediate: true })
+		return
+	}
+
+	scheduleReconnect({ immediate, nextState: getNextActiveState() })
+}
+
+function restartConnection({ immediate = false } = {}) {
+	if (!canMaintainConnection()) {
+		goOffline()
+		return
+	}
+
+	closeSocket(webSocket, ConnectionState.Reconnecting, true, immediate)
+}
+
+function goOffline() {
+	closeSocket(webSocket, ConnectionState.Offline)
+}
+
+function handleConnectionReady() {
+	const shouldSyncSlide = socketState.value !== ConnectionState.Connected
+
+	hasConnectedOnce = true
+	reconnectAttempts = 0
+	markServerActivity()
+	socketState.value = ConnectionState.Connected
+	startHeartbeatLoop()
+	flushQueuedReactions()
+
+	if (shouldSyncSlide)
+		broadcastSlideUpdate()
+}
+
 function sendReaction(key: FeedbackKey) {
 	if (isPresenter.value)
 		return
 
+	const now = Date.now()
+	if (now - lastReactionTapAt < REACTION_TAP_THROTTLE_MS)
+		return
+
+	lastReactionTapAt = now
+
 	const page = currentPage.value
 	const slideTitle = slides.value[page - 1]?.meta.slide.title || `Slide ${page}`
 	const emoji = emojiMap.value[key]
-
-	sendPayload({
+	const payload = {
 		mtype: SendType.Reactions,
 		emoji,
 		type: 'broadcast',
 		page,
 		slideTitle,
 		feedback: key,
-	})
+	} satisfies ReactionState
 
 	addAnimatedEmoji(emoji, key)
+	pruneQueuedReactions(now)
+
+	if (isSocketHealthy(now) && sendPayload(payload))
+		return
+
+	enqueueReaction(payload, now)
+	ensureActiveConnection({ immediate: true })
 }
 
 function broadcastSlideUpdate() {
@@ -284,7 +508,13 @@ function broadcastSlideUpdate() {
 
 function handleMessage(event: MessageEvent<string>) {
 	try {
-		const payload = JSON.parse(event.data) as ReactionState | SlideUpdateState
+		const payload = JSON.parse(event.data) as InboundMessage
+
+		markServerActivity()
+		handleConnectionReady()
+
+		if (payload.type === 'connected' || payload.type === 'heartbeat')
+			return
 
 		if (payload.type !== 'broadcast' || isPresenter.value)
 			return
@@ -297,7 +527,7 @@ function handleMessage(event: MessageEvent<string>) {
 		if (payload.mtype === SendType.Reactions && Number(payload.page) === currentPage.value)
 			addAnimatedEmoji(payload.emoji, payload.feedback)
 	} catch {
-		socketState.value = ConnectionState.Error
+		restartConnection({ immediate: true })
 	}
 }
 
@@ -317,57 +547,67 @@ function connect() {
 		if (webSocket !== socket)
 			return
 
-		reconnectAttempts = 0
-		socketState.value = ConnectionState.Connected
-		broadcastSlideUpdate()
+		lastServerActivityAt = Date.now()
+		startHeartbeatLoop()
+		sendPayload({
+			mtype: SendType.Ping,
+			type: 'heartbeat',
+			ts: Date.now(),
+		})
 	})
 
 	socket.addEventListener('message', handleMessage as EventListener)
 
 	socket.addEventListener('close', () => {
+		const closedIntentionally = intentionallyClosedSockets.has(socket)
+		if (closedIntentionally) {
+			intentionallyClosedSockets.delete(socket)
+			return
+		}
+
 		if (webSocket !== socket && webSocket !== undefined)
 			return
 
 		if (webSocket === socket)
 			webSocket = undefined
 
-		socketState.value = ConnectionState.Disconnected
-		scheduleReconnect()
+		clearHeartbeatTimer()
+		clearQueueFlushTimer()
+		lastServerActivityAt = 0
+		scheduleReconnect({ nextState: ConnectionState.Reconnecting })
 	})
 
 	socket.addEventListener('error', () => {
 		if (webSocket !== socket)
 			return
 
-		socketState.value = ConnectionState.Error
-		scheduleReconnect()
+		restartConnection({ immediate: true })
 	})
 }
 
 function disconnect() {
-	clearReconnectTimer()
-
-	const socket = webSocket
-	webSocket = undefined
-	socketState.value = ConnectionState.Disconnected
-	socket?.close()
+	goOffline()
 }
 
 function handleVisibilityChange() {
 	if (document.visibilityState === 'visible') {
-		scheduleReconnect({ immediate: true })
+		ensureActiveConnection({ immediate: true })
 		return
 	}
 
-	disconnect()
+	goOffline()
 }
 
 function handlePageShow() {
-	scheduleReconnect({ immediate: true })
+	ensureActiveConnection({ immediate: true })
 }
 
 function handlePageHide() {
-	disconnect()
+	goOffline()
+}
+
+function handleOffline() {
+	goOffline()
 }
 
 watch([currentPage, queryClicks], () => {
@@ -382,9 +622,10 @@ watch(currentPage, async () => {
 onMounted(() => {
 	isActive = true
 	detectBackgroundTone()
-	scheduleReconnect({ immediate: true })
+	ensureActiveConnection({ immediate: true })
 	document.addEventListener('visibilitychange', handleVisibilityChange)
 	window.addEventListener('focus', handlePageShow)
+	window.addEventListener('offline', handleOffline)
 	window.addEventListener('pagehide', handlePageHide)
 	window.addEventListener('pageshow', handlePageShow)
 	window.addEventListener('online', handlePageShow)
@@ -394,10 +635,11 @@ onUnmounted(() => {
 	isActive = false
 	document.removeEventListener('visibilitychange', handleVisibilityChange)
 	window.removeEventListener('focus', handlePageShow)
+	window.removeEventListener('offline', handleOffline)
 	window.removeEventListener('pagehide', handlePageHide)
 	window.removeEventListener('pageshow', handlePageShow)
 	window.removeEventListener('online', handlePageShow)
-	disconnect()
+	goOffline()
 })
 </script>
 
@@ -482,8 +724,16 @@ onUnmounted(() => {
 	color: #5eead4;
 }
 
-.reaction-status[data-state='error'] {
-	color: #fca5a5;
+.reaction-status[data-state='connecting'] {
+	color: #93c5fd;
+}
+
+.reaction-status[data-state='reconnecting'] {
+	color: #fcd34d;
+}
+
+.reaction-status[data-state='offline'] {
+	color: rgba(255, 255, 255, 0.55);
 }
 
 .emoji-stage {

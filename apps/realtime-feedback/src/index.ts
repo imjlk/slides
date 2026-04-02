@@ -5,6 +5,8 @@ import { logger } from 'hono/logger';
 
 type FeedbackType = 'okay' | 'good' | 'great' | 'mindBlown';
 type BroadcastType = 'broadcast';
+type HeartbeatType = 'heartbeat';
+type ConnectedType = 'connected';
 
 interface PresentationEntry {
 	id: number;
@@ -29,11 +31,14 @@ interface PresentationRegistration {
 
 interface SessionState {
 	id?: string;
+	reactionTimestamps?: number[];
 }
 
 enum SendType {
 	REACTIONS = 'reactions',
 	SLIDEUPDATE = 'slideupdate',
+	PING = 'ping',
+	PONG = 'pong',
 }
 
 interface SlideUpdateState {
@@ -50,7 +55,23 @@ interface ReactionState {
 	page: number | string;
 	slideTitle: string;
 	feedback: FeedbackType;
-	positionX?: number;
+}
+
+interface HeartbeatPingState {
+	mtype: SendType.PING;
+	type: HeartbeatType;
+	ts: number;
+}
+
+interface HeartbeatPongState {
+	mtype: SendType.PONG;
+	type: HeartbeatType;
+	ts: number;
+}
+
+interface ConnectedState {
+	type: ConnectedType;
+	id: string;
 }
 
 const FEEDBACK_COLUMNS: Record<FeedbackType, string> = {
@@ -60,10 +81,15 @@ const FEEDBACK_COLUMNS: Record<FeedbackType, string> = {
 	mindBlown: 'feedback_mindBlown',
 };
 
-function parseSocketMessage(message: ArrayBuffer | string): ReactionState | SlideUpdateState | null {
+const REACTION_RATE_LIMIT_WINDOW_MS = 5000;
+const REACTION_RATE_LIMIT_MAX = 12;
+
+type SocketMessage = ReactionState | SlideUpdateState | HeartbeatPingState | HeartbeatPongState;
+
+function parseSocketMessage(message: ArrayBuffer | string): SocketMessage | null {
 	try {
 		const raw = typeof message === 'string' ? message : new TextDecoder().decode(message);
-		return JSON.parse(raw) as ReactionState | SlideUpdateState;
+		return JSON.parse(raw) as SocketMessage;
 	} catch {
 		return null;
 	}
@@ -137,7 +163,11 @@ export class Slide extends DurableObject {
 		super(ctx, env);
 		this.session = new Map<WebSocket, SessionState>();
 		this.sql = this.ctx.storage.sql;
-		this.ctx.getWebSockets().forEach((ws) => this.session.set(ws, { ...ws.deserializeAttachment() } as SessionState));
+		this.ctx.getWebSockets().forEach((ws) => {
+			const session = this.normalizeSession(ws.deserializeAttachment() as SessionState | undefined);
+			this.session.set(ws, session);
+			ws.serializeAttachment(session);
+		});
 		this.env = env;
 
 		this.sql.exec(
@@ -148,6 +178,48 @@ export class Slide extends DurableObject {
 	getFeedback(): SlideEntry[] {
 		const result = this.sql.exec('SELECT * FROM slide ORDER BY slide_id');
 		return result.toArray() as unknown as SlideEntry[];
+	}
+
+	private normalizeSession(session?: SessionState): SessionState {
+		return {
+			id: session?.id,
+			reactionTimestamps: Array.isArray(session?.reactionTimestamps)
+				? session.reactionTimestamps.filter((value) => typeof value === 'number')
+				: [],
+		};
+	}
+
+	private createSession(): SessionState {
+		return {
+			id: crypto.randomUUID(),
+			reactionTimestamps: [],
+		};
+	}
+
+	private persistSession(ws: WebSocket, session: SessionState) {
+		this.session.set(ws, session);
+		ws.serializeAttachment(session);
+	}
+
+	private sendConnected(ws: WebSocket, session: SessionState) {
+		if (!session.id)
+			return;
+
+		ws.send(JSON.stringify({ type: 'connected', id: session.id } satisfies ConnectedState));
+	}
+
+	private acceptReaction(session: SessionState) {
+		const now = Date.now();
+		const timestamps = (session.reactionTimestamps ?? []).filter((timestamp) => now - timestamp < REACTION_RATE_LIMIT_WINDOW_MS);
+
+		if (timestamps.length >= REACTION_RATE_LIMIT_MAX) {
+			session.reactionTimestamps = timestamps;
+			return false;
+		}
+
+		timestamps.push(now);
+		session.reactionTimestamps = timestamps;
+		return true;
 	}
 
 	private addSlide(id: number, title: string) {
@@ -186,8 +258,10 @@ export class Slide extends DurableObject {
 
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
+		const session = this.createSession();
 		this.ctx.acceptWebSocket(server);
-		this.session.set(server, {});
+		this.persistSession(server, session);
+		this.sendConnected(server, session);
 
 		const presentationStub = this.env.PRESENTATION.get(this.env.PRESENTATION.idFromName('presentation'));
 		await presentationStub.upsertEntry({
@@ -202,21 +276,29 @@ export class Slide extends DurableObject {
 	}
 
 	webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
-		const session = this.session.get(ws) ?? {};
-		if (!session.id) {
-			session.id = crypto.randomUUID();
-			ws.serializeAttachment({ ...ws.deserializeAttachment(), id: session.id });
-			this.session.set(ws, session);
-			ws.send(JSON.stringify({ type: 'connected', id: session.id }));
-		}
+		const session = this.session.get(ws) ?? this.createSession();
+		this.persistSession(ws, session);
 
 		const receivedMessage = parseSocketMessage(message);
 		if (!receivedMessage)
 			return;
 
+		if (receivedMessage.type === 'heartbeat') {
+			if (receivedMessage.mtype === SendType.PING)
+				ws.send(JSON.stringify({ type: 'heartbeat', mtype: SendType.PONG, ts: receivedMessage.ts } satisfies HeartbeatPongState));
+
+			return;
+		}
+
 		const { page, type, mtype } = receivedMessage;
 
 		if (type === 'broadcast' && mtype === 'reactions') {
+			if (!this.acceptReaction(session)) {
+				this.persistSession(ws, session);
+				return;
+			}
+
+			this.persistSession(ws, session);
 			const { slideTitle, feedback } = receivedMessage;
 			this.addFeedback(Number(page), slideTitle, feedback);
 			this.broadcast(ws, receivedMessage);
@@ -235,8 +317,6 @@ export class Slide extends DurableObject {
 	}
 
 	private close(ws: WebSocket) {
-		const session = this.session.get(ws);
-		if (!session?.id) return;
 		this.session.delete(ws);
 	}
 	webSocketClose(ws: WebSocket) {
