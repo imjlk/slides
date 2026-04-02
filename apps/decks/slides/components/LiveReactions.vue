@@ -356,7 +356,7 @@ onUnmounted(() => {
 	background: rgba(255, 255, 255, 0.18);
 }
 
-@media (orientation: landscape) and (max-height: 500px) {
+@media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
 	.reaction-bar {
 		right: 16px;
 		bottom: 14px;
@@ -386,16 +386,18 @@ onUnmounted(() => {
 	z-index: 1100;
 	pointer-events: none;
 	overflow: hidden;
+	--reaction-bubble-size: 5.45rem;
+	--reaction-emoji-size: 3.2rem;
 }
 
 .animated-emoji {
 	position: absolute;
 	display: grid;
 	place-items: center;
-	width: calc(3.4rem / var(--reaction-item-scale, 1));
-	height: calc(3.4rem / var(--reaction-item-scale, 1));
+	width: calc(var(--reaction-bubble-size) / var(--reaction-item-scale, 1));
+	height: calc(var(--reaction-bubble-size) / var(--reaction-item-scale, 1));
 	border-radius: 999px;
-	font-size: calc(2rem / var(--reaction-item-scale, 1));
+	font-size: calc(var(--reaction-emoji-size) / var(--reaction-item-scale, 1));
 	text-shadow:
 		0 1px 0 rgba(255, 255, 255, 0.4),
 		0 8px 18px rgba(15, 23, 42, 0.35);
@@ -422,6 +424,13 @@ onUnmounted(() => {
 	border-color: rgba(255, 255, 255, 0.18);
 }
 
+@media (hover: none) and (pointer: coarse) {
+	.emoji-stage {
+		--reaction-bubble-size: 2.55rem;
+		--reaction-emoji-size: 1.5rem;
+	}
+}
+
 @keyframes float-up {
 	0% {
 		transform: translate(-50%, 0) scale(0.9);
@@ -443,7 +452,7 @@ onUnmounted(() => {
 </style>
 
 <style>
-@media (orientation: landscape) and (max-height: 500px) {
+@media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
 	.slidev-slide-container > .absolute.bottom-0.left-0,
 	.slidev-slide-container > .absolute.bottom-0.left-0 * {
 		pointer-events: none !important;
