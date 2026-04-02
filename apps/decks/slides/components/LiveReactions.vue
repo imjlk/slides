@@ -36,8 +36,9 @@ interface AnimatedEmoji {
 	id: number
 	emoji: string
 	x: number
-	delay: number
+	bottom: number
 	scale: number
+	drift: number
 }
 
 const { isPresenter, slides, currentPage, queryClicks, go } = useNav()
@@ -95,12 +96,6 @@ function getWsUrl() {
 	return url.toString()
 }
 
-function resolveViewportX(positionX?: number) {
-	const viewportWidth = window.innerWidth
-	const safeRatio = clamp(positionX ?? 0.84, 0.08, 0.92)
-	return safeRatio * viewportWidth / getCurrentSlideScale()
-}
-
 function parseRgbChannels(color: string) {
 	const match = color.match(/rgba?\(([^)]+)\)/)
 	if (!match)
@@ -148,10 +143,49 @@ function getCurrentSlideScale() {
 	return Number.isFinite(cssValue) && cssValue > 0 ? cssValue : 1
 }
 
-function addAnimatedEmoji(emoji: string, positionX?: number) {
-	const x = resolveViewportX(positionX)
-	const delay = Math.random() * 500
-	const item = { id: emojiCounter++, emoji, x, delay, scale: getCurrentSlideScale() }
+function getReactionStageRect() {
+	const stage = document.querySelector('.emoji-stage') as HTMLElement | null
+	const rect = stage?.getBoundingClientRect()
+
+	if (rect && rect.width > 0 && rect.height > 0)
+		return rect
+
+	return new DOMRect(0, 0, window.innerWidth, window.innerHeight)
+}
+
+function resolveReactionAnchor(key?: FeedbackKey) {
+	const scale = getCurrentSlideScale()
+	const stageRect = getReactionStageRect()
+	const selector = key ? `[data-reaction-key="${key}"]` : ''
+	const button = selector ? document.querySelector(selector) as HTMLElement | null : null
+
+	if (!button) {
+		return {
+			x: stageRect.width * 0.84 / scale,
+			bottom: 76 / scale,
+			scale,
+		}
+	}
+
+	const rect = button.getBoundingClientRect()
+
+	return {
+		x: clamp(rect.left + rect.width / 2 - stageRect.left, 24, Math.max(24, stageRect.width - 24)) / scale,
+		bottom: clamp(stageRect.bottom - rect.top + 4, 18, Math.max(18, stageRect.height - 18)) / scale,
+		scale,
+	}
+}
+
+function addAnimatedEmoji(emoji: string, key?: FeedbackKey) {
+	const anchor = resolveReactionAnchor(key)
+	const item = {
+		id: emojiCounter++,
+		emoji,
+		x: anchor.x,
+		bottom: anchor.bottom,
+		scale: anchor.scale,
+		drift: ((Math.random() * 14) - 7) / anchor.scale,
+	}
 
 	animatedEmojis.value.push(item)
 
@@ -167,27 +201,13 @@ function sendPayload(payload: ReactionState | SlideUpdateState) {
 	webSocket.send(JSON.stringify(payload))
 }
 
-function resolveReactionPositionX(event: MouseEvent) {
-	const target = event.currentTarget
-
-	if (!(target instanceof HTMLElement))
-		return 0.84
-
-	const rect = target.getBoundingClientRect()
-	const viewportWidth = Math.max(window.innerWidth, 1)
-	const centerX = rect.left + rect.width / 2
-
-	return clamp(centerX / viewportWidth, 0.08, 0.92)
-}
-
-function sendReaction(key: FeedbackKey, event: MouseEvent) {
+function sendReaction(key: FeedbackKey) {
 	if (isPresenter.value)
 		return
 
 	const page = currentPage.value
 	const slideTitle = slides.value[page - 1]?.meta.slide.title || `Slide ${page}`
 	const emoji = emojiMap.value[key]
-	const positionX = resolveReactionPositionX(event)
 
 	sendPayload({
 		mtype: SendType.Reactions,
@@ -196,10 +216,9 @@ function sendReaction(key: FeedbackKey, event: MouseEvent) {
 		page,
 		slideTitle,
 		feedback: key,
-		positionX,
 	})
 
-	addAnimatedEmoji(emoji, positionX)
+	addAnimatedEmoji(emoji, key)
 }
 
 function broadcastSlideUpdate() {
@@ -227,7 +246,7 @@ function handleMessage(event: MessageEvent<string>) {
 		}
 
 		if (payload.mtype === SendType.Reactions && Number(payload.page) === currentPage.value)
-			addAnimatedEmoji(payload.emoji, payload.positionX)
+			addAnimatedEmoji(payload.emoji, payload.feedback)
 	} catch {
 		socketState.value = ConnectionState.Error
 	}
@@ -283,8 +302,9 @@ onUnmounted(() => {
 			:key="key"
 			type="button"
 			class="reaction-button"
+			:data-reaction-key="key"
 			:title="`${key} reaction`"
-			@click="sendReaction(key as FeedbackKey, $event)"
+			@click="sendReaction(key as FeedbackKey)"
 		>
 			{{ emoji }}
 		</button>
@@ -296,7 +316,7 @@ onUnmounted(() => {
 			v-for="emoji in animatedEmojis"
 			:key="emoji.id"
 			class="animated-emoji"
-			:style="{ left: `${emoji.x}px`, animationDelay: `${emoji.delay}ms`, '--reaction-item-scale': String(emoji.scale) }"
+			:style="{ left: `${emoji.x}px`, bottom: `${emoji.bottom}px`, '--reaction-item-scale': String(emoji.scale), '--reaction-drift': `${emoji.drift}px` }"
 		>
 			{{ emoji.emoji }}
 		</div>
@@ -363,12 +383,10 @@ onUnmounted(() => {
 
 .animated-emoji {
 	position: absolute;
-	bottom: calc(88px / var(--reaction-item-scale, 1));
 	display: grid;
 	place-items: center;
 	width: calc(3.4rem / var(--reaction-item-scale, 1));
 	height: calc(3.4rem / var(--reaction-item-scale, 1));
-	margin-left: calc(-1.7rem / var(--reaction-item-scale, 1));
 	border-radius: 999px;
 	font-size: calc(2rem / var(--reaction-item-scale, 1));
 	text-shadow:
@@ -380,6 +398,7 @@ onUnmounted(() => {
 		0 18px 30px rgba(15, 23, 42, 0.22),
 		inset 0 1px 0 rgba(255, 255, 255, 0.24);
 	backdrop-filter: blur(10px) saturate(1.1);
+	will-change: transform, opacity;
 	animation: float-up 2.8s ease-out forwards;
 }
 
@@ -398,7 +417,7 @@ onUnmounted(() => {
 
 @keyframes float-up {
 	0% {
-		transform: translateY(0) scale(0.92);
+		transform: translate(-50%, 0) scale(0.9);
 		opacity: 0;
 	}
 
@@ -407,7 +426,10 @@ onUnmounted(() => {
 	}
 
 	100% {
-		transform: translateY(-68vh) scale(1.08);
+		transform: translate(
+			calc(-50% + var(--reaction-drift, 0px)),
+			calc(-42vh / var(--reaction-item-scale, 1))
+		) scale(1.06);
 		opacity: 0;
 	}
 }
