@@ -94,6 +94,13 @@ const emojiMap = computed(() => {
 	}
 })
 
+const isDevEnvironment = import.meta.env.DEV
+const deckPdfFileName = `${import.meta.env.VITE_SLIDEV_PRESENTATION_ID || slugify(configs.title || 'slidev-deck')}.pdf`
+const deckPdfHref = isDevEnvironment
+	? '/export/'
+	: `${import.meta.env.BASE_URL}${deckPdfFileName}`
+const deckPdfTitle = isDevEnvironment ? 'Open browser exporter' : 'Download PDF'
+
 function slugify(value: string) {
 	return value
 		.trim()
@@ -635,6 +642,14 @@ onUnmounted(() => {
 
 <template>
 	<div v-if="!isPresenter" class="reaction-bar">
+		<a
+			class="reaction-download"
+			:href="deckPdfHref"
+			:download="isDevEnvironment ? null : deckPdfFileName"
+			:title="deckPdfTitle"
+		>
+			PDF
+		</a>
 		<button
 			v-for="(emoji, key) in emojiMap"
 			:key="key"
@@ -692,6 +707,28 @@ onUnmounted(() => {
 .reaction-button:hover {
 	transform: translateY(-1px) scale(1.04);
 	background: rgba(255, 255, 255, 0.18);
+}
+
+.reaction-download {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 46px;
+	height: 40px;
+	padding: 0 14px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.16);
+	color: white;
+	font-size: 12px;
+	font-weight: 800;
+	letter-spacing: 0.08em;
+	text-decoration: none;
+	transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.reaction-download:hover {
+	transform: translateY(-1px) scale(1.03);
+	background: rgba(255, 255, 255, 0.24);
 }
 
 @media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {

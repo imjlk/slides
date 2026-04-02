@@ -23,11 +23,13 @@ for (const fileName of slideEntries) {
   const deckId = basename(fileName, '.md')
   const entryPath = join('slides', fileName)
   const tempOutputPath = resolve(slidesDir, `.slidev-dist-${deckId}`)
+  const tempPdfPath = resolve(slidesDir, `.slidev-export-${deckId}.pdf`)
   const title = await resolveDeckTitle(resolve(slidesDir, fileName), deckId)
 
   decks.push({ deckId, title })
 
   await rm(tempOutputPath, { recursive: true, force: true })
+  await rm(tempPdfPath, { force: true })
 
   await runCommand(
     bunxBin,
@@ -45,9 +47,25 @@ for (const fileName of slideEntries) {
     },
   )
 
+  await runCommand(
+    bunxBin,
+    [
+      'slidev',
+      'export',
+      entryPath,
+      '--output',
+      tempPdfPath,
+    ],
+    {
+      VITE_SLIDEV_PRESENTATION_ID: deckId,
+    },
+  )
+
   await unlink(resolve(tempOutputPath, '_redirects')).catch(() => {})
   await cp(tempOutputPath, resolve(distDir, deckId), { recursive: true })
+  await cp(tempPdfPath, resolve(distDir, deckId, `${deckId}.pdf`))
   await rm(tempOutputPath, { recursive: true, force: true })
+  await rm(tempPdfPath, { force: true })
 }
 
 await writeFile(resolve(distDir, 'index.html'), renderDeckIndex(decks), 'utf8')
@@ -86,10 +104,16 @@ function escapeHtml(value) {
 
 function renderDeckIndex(decks) {
   const items = decks.map(({ deckId, title }) => `
-      <a class="deck-card" href="/${deckId}/">
-        <span class="deck-id">/${deckId}/</span>
-        <strong>${escapeHtml(title)}</strong>
-      </a>
+      <article class="deck-card">
+        <a class="deck-card-main" href="/${deckId}/">
+          <span class="deck-id">/${deckId}/</span>
+          <strong>${escapeHtml(title)}</strong>
+        </a>
+        <div class="deck-actions">
+          <a class="deck-action deck-action-open" href="/${deckId}/">Open</a>
+          <a class="deck-action deck-action-pdf" href="/${deckId}/${deckId}.pdf" download="${deckId}.pdf" title="${escapeHtml(title)} PDF 다운로드">PDF</a>
+        </div>
+      </article>
     `).join('\n')
 
   return `<!doctype html>
@@ -137,20 +161,22 @@ function renderDeckIndex(decks) {
         margin-top: 40px;
       }
       .deck-card {
-        display: block;
         border: 1px solid #cbd5e1;
         border-radius: 20px;
-        padding: 20px;
         background: rgba(255, 255, 255, 0.84);
         backdrop-filter: blur(8px);
-        color: inherit;
-        text-decoration: none;
         box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
         transition: transform 0.2s ease, box-shadow 0.2s ease;
       }
       .deck-card:hover {
         transform: translateY(-2px);
         box-shadow: 0 16px 36px rgba(15, 23, 42, 0.10);
+      }
+      .deck-card-main {
+        display: block;
+        padding: 20px 20px 10px;
+        color: inherit;
+        text-decoration: none;
       }
       .deck-id {
         display: inline-block;
@@ -167,6 +193,42 @@ function renderDeckIndex(decks) {
         display: block;
         font-size: 1.05rem;
         line-height: 1.5;
+      }
+      .deck-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 0 20px 20px;
+      }
+      .deck-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 700;
+        transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+      }
+      .deck-action:hover {
+        transform: translateY(-1px);
+      }
+      .deck-action-open {
+        background: #e2e8f0;
+        color: #0f172a;
+      }
+      .deck-action-pdf {
+        min-width: 48px;
+        background: #0f172a;
+        color: white;
+        letter-spacing: 0.04em;
+      }
+      .deck-action-pdf::before {
+        content: "↓";
+        margin-right: 0.35rem;
+        font-size: 0.95em;
       }
       code {
         padding: 0.15rem 0.4rem;
