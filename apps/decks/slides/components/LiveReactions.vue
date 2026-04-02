@@ -49,6 +49,9 @@ const backgroundTone = ref<'light' | 'dark'>('dark')
 
 let webSocket: WebSocket | undefined
 let emojiCounter = 0
+let reconnectTimer: number | undefined
+let reconnectAttempts = 0
+let isActive = false
 
 const emojiMap = computed(() => {
 	const reactions = configs.liveReactions || {}
@@ -201,6 +204,52 @@ function sendPayload(payload: ReactionState | SlideUpdateState) {
 	webSocket.send(JSON.stringify(payload))
 }
 
+function clearReconnectTimer() {
+	if (reconnectTimer === undefined)
+		return
+
+	window.clearTimeout(reconnectTimer)
+	reconnectTimer = undefined
+}
+
+function canMaintainConnection() {
+	if (!isActive)
+		return false
+
+	if (document.visibilityState === 'hidden')
+		return false
+
+	if (typeof navigator !== 'undefined' && 'onLine' in navigator && !navigator.onLine)
+		return false
+
+	return true
+}
+
+function scheduleReconnect({ immediate = false } = {}) {
+	if (!canMaintainConnection())
+		return
+
+	if (webSocket && (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING))
+		return
+
+	if (!immediate && reconnectTimer !== undefined)
+		return
+
+	clearReconnectTimer()
+
+	if (!immediate)
+		reconnectAttempts += 1
+
+	const delay = immediate
+		? 0
+		: Math.min(1000 * 2 ** Math.max(0, reconnectAttempts - 1), 10000)
+
+	reconnectTimer = window.setTimeout(() => {
+		reconnectTimer = undefined
+		connect()
+	}, delay)
+}
+
 function sendReaction(key: FeedbackKey) {
 	if (isPresenter.value)
 		return
@@ -253,27 +302,72 @@ function handleMessage(event: MessageEvent<string>) {
 }
 
 function connect() {
-	webSocket = new WebSocket(getWsUrl())
+	if (!canMaintainConnection())
+		return
 
-	webSocket.addEventListener('open', () => {
+	if (webSocket && (webSocket.readyState === WebSocket.OPEN || webSocket.readyState === WebSocket.CONNECTING))
+		return
+
+	clearReconnectTimer()
+
+	const socket = new WebSocket(getWsUrl())
+	webSocket = socket
+
+	socket.addEventListener('open', () => {
+		if (webSocket !== socket)
+			return
+
+		reconnectAttempts = 0
 		socketState.value = ConnectionState.Connected
 		broadcastSlideUpdate()
 	})
 
-	webSocket.addEventListener('message', handleMessage as EventListener)
+	socket.addEventListener('message', handleMessage as EventListener)
 
-	webSocket.addEventListener('close', () => {
+	socket.addEventListener('close', () => {
+		if (webSocket !== socket && webSocket !== undefined)
+			return
+
+		if (webSocket === socket)
+			webSocket = undefined
+
 		socketState.value = ConnectionState.Disconnected
+		scheduleReconnect()
 	})
 
-	webSocket.addEventListener('error', () => {
+	socket.addEventListener('error', () => {
+		if (webSocket !== socket)
+			return
+
 		socketState.value = ConnectionState.Error
+		scheduleReconnect()
 	})
 }
 
 function disconnect() {
-	webSocket?.close()
+	clearReconnectTimer()
+
+	const socket = webSocket
 	webSocket = undefined
+	socketState.value = ConnectionState.Disconnected
+	socket?.close()
+}
+
+function handleVisibilityChange() {
+	if (document.visibilityState === 'visible') {
+		scheduleReconnect({ immediate: true })
+		return
+	}
+
+	disconnect()
+}
+
+function handlePageShow() {
+	scheduleReconnect({ immediate: true })
+}
+
+function handlePageHide() {
+	disconnect()
 }
 
 watch([currentPage, queryClicks], () => {
@@ -286,11 +380,23 @@ watch(currentPage, async () => {
 })
 
 onMounted(() => {
+	isActive = true
 	detectBackgroundTone()
-	connect()
+	scheduleReconnect({ immediate: true })
+	document.addEventListener('visibilitychange', handleVisibilityChange)
+	window.addEventListener('focus', handlePageShow)
+	window.addEventListener('pagehide', handlePageHide)
+	window.addEventListener('pageshow', handlePageShow)
+	window.addEventListener('online', handlePageShow)
 })
 
 onUnmounted(() => {
+	isActive = false
+	document.removeEventListener('visibilitychange', handleVisibilityChange)
+	window.removeEventListener('focus', handlePageShow)
+	window.removeEventListener('pagehide', handlePageHide)
+	window.removeEventListener('pageshow', handlePageShow)
+	window.removeEventListener('online', handlePageShow)
 	disconnect()
 })
 </script>
