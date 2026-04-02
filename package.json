@@ -1,0 +1,17 @@
+{
+	"name": "slides-workspace",
+	"private": true,
+	"packageManager": "bun@1.3.10",
+	"workspaces": ["apps/*"],
+	"scripts": {
+		"build": "bun run build:pages",
+		"build:pages": "bun run --filter @slides/decks build",
+		"dev:pages": "bun run --filter @slides/decks dev",
+		"dev:deck": "bun run --filter @slides/decks dev:deck",
+		"preview:pages": "bun run --filter @slides/decks preview",
+		"check": "bun run check:feedback",
+		"check:feedback": "bun run --filter @slides/realtime-feedback check",
+		"cf-typegen:feedback": "bun run --filter @slides/realtime-feedback cf-typegen",
+		"deploy:feedback": "bun run --filter @slides/realtime-feedback deploy"
+	}
+}

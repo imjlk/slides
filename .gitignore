@@ -1,0 +1,6 @@
+.DS_Store
+.wrangler/
+node_modules/
+apps/*/node_modules/
+apps/*/dist/
+apps/decks/.slidev-dist-*/

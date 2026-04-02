@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ko">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Slide Feedback Dashboard</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--bg: #07111f;
+				--bg-soft: rgba(15, 23, 42, 0.78);
+				--panel: rgba(15, 23, 42, 0.9);
+				--panel-strong: rgba(15, 23, 42, 0.96);
+				--border: rgba(148, 163, 184, 0.22);
+				--text: #e2e8f0;
+				--text-muted: #94a3b8;
+				--accent: #22d3ee;
+				--accent-soft: rgba(34, 211, 238, 0.12);
+				font-family:
+					'IBM Plex Sans',
+					'Pretendard',
+					'Noto Sans KR',
+					system-ui,
+					sans-serif;
+			}
+			body {
+				margin: 0;
+				min-height: 100vh;
+				background:
+					radial-gradient(circle at top left, rgba(34, 211, 238, 0.14), transparent 28rem),
+					radial-gradient(circle at bottom right, rgba(45, 212, 191, 0.14), transparent 24rem),
+					var(--bg);
+				color: var(--text);
+			}
+			table {
+				width: 100%;
+				border-collapse: collapse;
+				border-radius: 18px;
+				overflow: hidden;
+				background: rgba(15, 23, 42, 0.5);
+			}
+			th,
+			td {
+				border-bottom: 1px solid var(--border);
+				padding: 12px 14px;
+				text-align: left;
+			}
+			th {
+				background: rgba(15, 23, 42, 0.92);
+				color: var(--text-muted);
+				font-size: 12px;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+			}
+			td {
+				background: rgba(15, 23, 42, 0.44);
+			}
+			tr:last-child td {
+				border-bottom: 0;
+			}
+			main {
+				max-width: 1120px;
+				margin: 0 auto;
+				padding: 56px 20px 72px;
+			}
+			header {
+				margin-bottom: 28px;
+			}
+			h1 {
+				margin-top: 0;
+				margin-bottom: 12px;
+				font-size: clamp(2rem, 5vw, 3.75rem);
+				line-height: 1;
+			}
+			p {
+				margin: 0;
+				max-width: 52rem;
+				color: var(--text-muted);
+				line-height: 1.7;
+			}
+			.grid {
+				display: grid;
+				grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+				gap: 18px;
+				align-items: start;
+			}
+			.panel {
+				border: 1px solid var(--border);
+				border-radius: 24px;
+				padding: 24px;
+				background: var(--panel);
+				backdrop-filter: blur(18px);
+				box-shadow: 0 16px 50px rgba(2, 6, 23, 0.28);
+			}
+			.panel h2 {
+				margin: 0 0 8px;
+				font-size: 1rem;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--text-muted);
+			}
+			.panel p {
+				font-size: 0.95rem;
+			}
+			.deck-list {
+				margin-top: 18px;
+				display: grid;
+				gap: 10px;
+			}
+			.deck-button {
+				width: 100%;
+				padding: 16px 18px;
+				border: 1px solid var(--border);
+				border-radius: 18px;
+				background: rgba(15, 23, 42, 0.56);
+				color: var(--text);
+				cursor: pointer;
+				text-align: left;
+				transition:
+					transform 0.16s ease,
+					border-color 0.16s ease,
+					background 0.16s ease;
+			}
+			.deck-button:hover {
+				transform: translateY(-1px);
+				border-color: rgba(34, 211, 238, 0.4);
+			}
+			.deck-button.is-selected {
+				border-color: rgba(34, 211, 238, 0.5);
+				background: var(--accent-soft);
+			}
+			.deck-id {
+				display: inline-flex;
+				padding: 4px 10px;
+				border-radius: 999px;
+				background: rgba(34, 211, 238, 0.12);
+				color: var(--accent);
+				font-size: 12px;
+				font-weight: 700;
+				letter-spacing: 0.08em;
+			}
+			.deck-title {
+				display: block;
+				margin-top: 10px;
+				font-size: 1rem;
+				font-weight: 600;
+				line-height: 1.5;
+			}
+			.state {
+				margin-top: 16px;
+				padding: 14px 16px;
+				border: 1px dashed var(--border);
+				border-radius: 18px;
+				color: var(--text-muted);
+				background: rgba(15, 23, 42, 0.35);
+			}
+			.stats-header {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 10px;
+				align-items: center;
+				justify-content: space-between;
+				margin-bottom: 18px;
+			}
+			.stats-title {
+				margin: 0;
+				font-size: 1.4rem;
+			}
+			.meta-chip {
+				display: inline-flex;
+				align-items: center;
+				gap: 8px;
+				padding: 8px 12px;
+				border-radius: 999px;
+				background: rgba(148, 163, 184, 0.12);
+				color: var(--text-muted);
+				font-size: 13px;
+			}
+			@media (max-width: 860px) {
+				.grid {
+					grid-template-columns: 1fr;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<header>
+				<h1>Slide Feedback Dashboard</h1>
+				<p>
+					여러 Slidev 덱에서 수집한 리액션을 프레젠테이션 단위로 조회합니다.
+					왼쪽에서 덱을 선택하면 슬라이드별 반응 집계를 확인할 수 있습니다.
+				</p>
+			</header>
+
+			<div class="grid">
+				<section class="panel">
+					<h2>Presentations</h2>
+					<p>웹소켓으로 등록된 덱 목록입니다. 같은 서비스에서 여러 발표를 함께 운영할 수 있습니다.</p>
+					<div id="presentations-output" class="deck-list"></div>
+				</section>
+
+				<section class="panel">
+					<div class="stats-header">
+						<div>
+							<h2>Feedback</h2>
+							<h3 id="feedback-title" class="stats-title">프레젠테이션을 선택해 주세요</h3>
+						</div>
+						<div id="feedback-meta" class="meta-chip" hidden></div>
+					</div>
+					<div id="feedback-output" class="state">왼쪽 패널에서 발표를 선택하면 슬라이드별 반응 데이터가 여기에 표시됩니다.</div>
+				</section>
+			</div>
+		</main>
+
+		<script>
+			const presentationsOutput = document.getElementById('presentations-output');
+			const feedbackOutput = document.getElementById('feedback-output');
+			const feedbackTitle = document.getElementById('feedback-title');
+			const feedbackMeta = document.getElementById('feedback-meta');
+			const searchParams = new URLSearchParams(window.location.search);
+			let presentations = [];
+			let selectedPresentationId = searchParams.get('presentation');
+
+			function endpoint(path) {
+				return new URL(path, window.location.origin).toString();
+			}
+
+			function setState(message) {
+				feedbackOutput.className = 'state';
+				feedbackOutput.textContent = message;
+			}
+
+			function renderFeedbackTable(rows) {
+				if (!rows.length) {
+					setState('아직 기록된 슬라이드 리액션이 없습니다.');
+					return;
+				}
+
+				const table = document.createElement('table');
+				const headerRow = document.createElement('tr');
+				const headers = Object.keys(rows[0]);
+
+				headers.forEach((header) => {
+					const th = document.createElement('th');
+					th.textContent = header;
+					headerRow.appendChild(th);
+				});
+
+				const thead = document.createElement('thead');
+				thead.appendChild(headerRow);
+				table.appendChild(thead);
+
+				const tbody = document.createElement('tbody');
+				rows.forEach((row) => {
+					const tr = document.createElement('tr');
+					headers.forEach((header) => {
+						const td = document.createElement('td');
+						td.textContent = String(row[header] ?? '');
+						tr.appendChild(td);
+					});
+					tbody.appendChild(tr);
+				});
+
+				table.appendChild(tbody);
+				feedbackOutput.className = '';
+				feedbackOutput.innerHTML = '';
+				feedbackOutput.appendChild(table);
+			}
+
+			function renderPresentations() {
+				presentationsOutput.innerHTML = '';
+
+				if (!presentations.length) {
+					const empty = document.createElement('div');
+					empty.className = 'state';
+					empty.textContent = '아직 등록된 프레젠테이션이 없습니다. 덱에서 웹소켓 연결이 발생하면 여기에 나타납니다.';
+					presentationsOutput.appendChild(empty);
+					return;
+				}
+
+				presentations.forEach((presentation) => {
+					const button = document.createElement('button');
+					button.type = 'button';
+					button.className = `deck-button${presentation.PresentationId === selectedPresentationId ? ' is-selected' : ''}`;
+					button.addEventListener('click', () => {
+						selectPresentation(presentation.PresentationId);
+					});
+
+					const chip = document.createElement('span');
+					chip.className = 'deck-id';
+					chip.textContent = presentation.PresentationId;
+
+					const title = document.createElement('strong');
+					title.className = 'deck-title';
+					title.textContent = presentation.Title;
+
+					button.appendChild(chip);
+					button.appendChild(title);
+					presentationsOutput.appendChild(button);
+				});
+			}
+
+			async function fetchJson(path) {
+				const response = await fetch(endpoint(path));
+				if (!response.ok) {
+					const message = await response.text();
+					throw new Error(message || `Request failed with status ${response.status}`);
+				}
+
+				return response.json();
+			}
+
+			async function loadPresentations() {
+				try {
+					presentations = await fetchJson('/api/presentations');
+					renderPresentations();
+
+					if (selectedPresentationId) {
+						await selectPresentation(selectedPresentationId);
+						return;
+					}
+
+					if (presentations[0]) {
+						await selectPresentation(presentations[0].PresentationId);
+					}
+				} catch (error) {
+					presentationsOutput.innerHTML = `<div class="state">프레젠테이션 목록을 불러오지 못했습니다. ${error.message}</div>`;
+				}
+			}
+
+			async function selectPresentation(presentationId) {
+				selectedPresentationId = presentationId;
+				const selected = presentations.find((presentation) => presentation.PresentationId === presentationId);
+				renderPresentations();
+
+				if (!selected) {
+					feedbackTitle.textContent = '프레젠테이션을 찾지 못했습니다';
+					feedbackMeta.hidden = true;
+					setState('선택한 프레젠테이션 정보를 찾지 못했습니다.');
+					return;
+				}
+
+				feedbackTitle.textContent = selected.Title;
+				feedbackMeta.hidden = false;
+				feedbackMeta.textContent = selected.PresentationId;
+				setState('슬라이드 반응 데이터를 불러오는 중입니다...');
+
+				const nextUrl = new URL(window.location.href);
+				nextUrl.searchParams.set('presentation', presentationId);
+				window.history.replaceState({}, '', nextUrl);
+
+				try {
+					const data = await fetchJson(`/api/presentations/${encodeURIComponent(presentationId)}/feedback`);
+					renderFeedbackTable(data);
+				} catch (error) {
+					setState(`피드백을 불러오지 못했습니다. ${error.message}`);
+				}
+			}
+
+			loadPresentations();
+		</script>
+	</body>
+</html>

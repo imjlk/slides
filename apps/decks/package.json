@@ -1,0 +1,26 @@
+{
+	"name": "@slides/decks",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "node ./scripts/build-cloudflare-pages.mjs",
+		"build:deck": "node ./scripts/run-slidev-deck.mjs build",
+		"dev": "node ./scripts/run-slidev-deck.mjs dev slides/service-domain-review.md",
+		"dev:deck": "node ./scripts/run-slidev-deck.mjs dev",
+		"export": "node ./scripts/run-slidev-deck.mjs export slides/service-domain-review.md",
+		"export:deck": "node ./scripts/run-slidev-deck.mjs export",
+		"preview": "wrangler pages dev dist"
+	},
+	"dependencies": {
+		"@harshil1712/slidev-addon-protected-presenter": "^0.0.1",
+		"@slidev/cli": "^51.5.0",
+		"@slidev/theme-apple-basic": "^0.25.1",
+		"@slidev/theme-bricks": "^0.25.0",
+		"@slidev/theme-default": "^0.25.0",
+		"@slidev/theme-seriph": "^0.25.0",
+		"vue": "^3.5.29"
+	},
+	"devDependencies": {
+		"wrangler": "^4.6.0"
+	}
+}

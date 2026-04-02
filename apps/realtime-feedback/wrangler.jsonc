@@ -1,0 +1,30 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "slidev-realtime-feedback-do",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-04-02",
+	"assets": {
+		"directory": "public"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "PRESENTATION",
+				"class_name": "Presentation"
+			},
+			{
+				"name": "SLIDE",
+				"class_name": "Slide"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["Presentation", "Slide"]
+		}
+	]
+}
