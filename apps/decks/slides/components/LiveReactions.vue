@@ -95,6 +95,7 @@ const emojiMap = computed(() => {
 })
 
 const isDevEnvironment = import.meta.env.DEV
+const isBrowserExporterRoute = typeof window !== 'undefined' && window.location.pathname.includes('/export')
 const deckPdfFileName = `${import.meta.env.VITE_SLIDEV_PRESENTATION_ID || slugify(configs.title || 'slidev-deck')}.pdf`
 const deckPdfHref = isDevEnvironment
 	? '/export/'
@@ -641,7 +642,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div v-if="!isPresenter" class="reaction-bar">
+	<div v-if="!isPresenter && !isBrowserExporterRoute" class="reaction-bar">
 		<a
 			class="reaction-download"
 			:href="deckPdfHref"
@@ -664,7 +665,7 @@ onUnmounted(() => {
 		<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
 	</div>
 
-	<div class="emoji-stage" :data-background-tone="backgroundTone" aria-hidden="true">
+	<div v-if="!isBrowserExporterRoute" class="emoji-stage" :data-background-tone="backgroundTone" aria-hidden="true">
 		<div
 			v-for="emoji in animatedEmojis"
 			:key="emoji.id"
@@ -835,6 +836,13 @@ onUnmounted(() => {
 </style>
 
 <style>
+@media print {
+	.reaction-bar,
+	.emoji-stage {
+		display: none !important;
+	}
+}
+
 @media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
 	.slidev-slide-container > .absolute.bottom-0.left-0,
 	.slidev-slide-container > .absolute.bottom-0.left-0 * {
