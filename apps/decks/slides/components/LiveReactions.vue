@@ -704,16 +704,15 @@ onUnmounted(() => {
 	right: 12px;
 	bottom: 18px;
 	z-index: 1000;
-	display: flex;
-	align-items: center;
-	justify-content: flex-end;
-	gap: 8px;
+	min-width: 36px;
+	min-height: 60px;
 }
 
 .reaction-bar {
 	display: flex;
 	align-items: center;
 	gap: 8px;
+	margin-right: 44px;
 	padding: 10px 12px;
 	border: 1px solid rgba(148, 163, 184, 0.2);
 	border-radius: 999px;
@@ -748,6 +747,9 @@ onUnmounted(() => {
 }
 
 .reaction-toggle {
+	position: absolute;
+	right: 0;
+	top: 50%;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -764,11 +766,12 @@ onUnmounted(() => {
 	cursor: pointer;
 	backdrop-filter: blur(12px);
 	box-shadow: 0 8px 22px rgba(15, 23, 42, 0.2);
+	transform: translateY(-50%);
 	transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .reaction-toggle:hover {
-	transform: translateY(-1px);
+	transform: translateY(calc(-50% - 1px));
 	background: rgba(15, 23, 42, 0.76);
 	color: white;
 }
