@@ -102,7 +102,8 @@ const deckPdfHref = isDevEnvironment
 	? '/export/'
 	: `${import.meta.env.BASE_URL}${deckPdfFileName}`
 const deckPdfTitle = isDevEnvironment ? 'Open browser exporter' : 'Download PDF'
-const reactionToggleLabel = computed(() => isReactionControlsVisible.value ? '리액션 접기' : '리액션 펼치기')
+const reactionToggleLabel = computed(() => isReactionControlsVisible.value ? '리액션 및 PDF 숨기기' : '리액션 및 PDF 열기')
+const reactionToggleGlyph = computed(() => isReactionControlsVisible.value ? '›' : '‹')
 
 function slugify(value: string) {
 	return value
@@ -649,7 +650,7 @@ onUnmounted(() => {
 
 <template>
 	<div v-if="!isPresenter && !isBrowserExporterRoute" class="reaction-dock">
-		<div class="reaction-bar" :data-collapsed="String(!isReactionControlsVisible)">
+		<div v-if="isReactionControlsVisible" class="reaction-bar">
 			<a
 				class="reaction-download"
 				:href="deckPdfHref"
@@ -676,10 +677,12 @@ onUnmounted(() => {
 		<button
 			type="button"
 			class="reaction-toggle"
+			:aria-label="reactionToggleLabel"
 			:aria-expanded="String(isReactionControlsVisible)"
+			:title="reactionToggleLabel"
 			@click="toggleReactionControls"
 		>
-			{{ reactionToggleLabel }}
+			<span aria-hidden="true">{{ reactionToggleGlyph }}</span>
 		</button>
 	</div>
 
@@ -698,12 +701,12 @@ onUnmounted(() => {
 <style scoped>
 .reaction-dock {
 	position: fixed;
-	right: 20px;
+	right: 12px;
 	bottom: 18px;
 	z-index: 1000;
 	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
+	align-items: center;
+	justify-content: flex-end;
 	gap: 8px;
 }
 
@@ -717,10 +720,6 @@ onUnmounted(() => {
 	background: rgba(15, 23, 42, 0.72);
 	backdrop-filter: blur(12px);
 	box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
-}
-
-.reaction-bar[data-collapsed='true'] {
-	padding-right: 10px;
 }
 
 .reaction-controls {
@@ -752,30 +751,31 @@ onUnmounted(() => {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	min-height: 30px;
-	padding: 0 12px;
+	width: 36px;
+	height: 36px;
+	padding: 0;
 	border: 1px solid rgba(148, 163, 184, 0.22);
 	border-radius: 999px;
-	background: rgba(15, 23, 42, 0.58);
-	color: rgba(255, 255, 255, 0.82);
-	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0.04em;
+	background: rgba(15, 23, 42, 0.64);
+	color: rgba(255, 255, 255, 0.88);
+	font-size: 18px;
+	font-weight: 800;
+	line-height: 1;
 	cursor: pointer;
 	backdrop-filter: blur(12px);
-	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+	box-shadow: 0 8px 22px rgba(15, 23, 42, 0.2);
 	transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .reaction-toggle:hover {
 	transform: translateY(-1px);
-	background: rgba(15, 23, 42, 0.68);
+	background: rgba(15, 23, 42, 0.76);
 	color: white;
 }
 
 .reaction-toggle[aria-expanded='false'] {
-	background: rgba(15, 23, 42, 0.5);
-	color: rgba(255, 255, 255, 0.72);
+	background: rgba(15, 23, 42, 0.58);
+	color: rgba(255, 255, 255, 0.82);
 }
 
 .reaction-download {
@@ -810,7 +810,7 @@ onUnmounted(() => {
 
 @media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
 	.reaction-dock {
-		right: 16px;
+		right: 10px;
 		bottom: 14px;
 	}
 
