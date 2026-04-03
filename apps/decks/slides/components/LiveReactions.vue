@@ -104,6 +104,7 @@ const deckPdfHref = isDevEnvironment
 const deckPdfTitle = isDevEnvironment ? 'Open browser exporter' : 'Download PDF'
 const reactionToggleLabel = computed(() => isReactionControlsVisible.value ? '리액션 및 PDF 숨기기' : '리액션 및 PDF 열기')
 const reactionToggleGlyph = computed(() => isReactionControlsVisible.value ? '›' : '‹')
+const collapsedReactionPreview = computed(() => Object.values(emojiMap.value).slice(0, 2))
 
 function slugify(value: string) {
 	return value
@@ -650,40 +651,54 @@ onUnmounted(() => {
 
 <template>
 	<div v-if="!isPresenter && !isBrowserExporterRoute" class="reaction-dock">
-		<div v-if="isReactionControlsVisible" class="reaction-bar">
-			<a
-				class="reaction-download"
-				:href="deckPdfHref"
-				:download="isDevEnvironment ? null : deckPdfFileName"
-				:title="deckPdfTitle"
-			>
-				PDF
-			</a>
-			<div v-if="isReactionControlsVisible" class="reaction-controls">
-				<button
-					v-for="(emoji, key) in emojiMap"
-					:key="key"
-					type="button"
-					class="reaction-button"
-					:data-reaction-key="key"
-					:title="`${key} reaction`"
-					@click="sendReaction(key as FeedbackKey)"
+		<div class="reaction-bar" :data-collapsed="String(!isReactionControlsVisible)">
+			<template v-if="isReactionControlsVisible">
+				<a
+					class="reaction-download"
+					:href="deckPdfHref"
+					:download="isDevEnvironment ? null : deckPdfFileName"
+					:title="deckPdfTitle"
 				>
-					{{ emoji }}
-				</button>
-				<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
+					PDF
+				</a>
+				<div class="reaction-controls">
+					<button
+						v-for="(emoji, key) in emojiMap"
+						:key="key"
+						type="button"
+						class="reaction-button"
+						:data-reaction-key="key"
+						:title="`${key} reaction`"
+						@click="sendReaction(key as FeedbackKey)"
+					>
+						{{ emoji }}
+					</button>
+					<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
+				</div>
+			</template>
+			<div v-else class="reaction-preview" aria-hidden="true">
+				<div class="reaction-preview-icons">
+					<span
+						v-for="(emoji, index) in collapsedReactionPreview"
+						:key="`${emoji}-${index}`"
+						class="reaction-preview-emoji"
+					>
+						{{ emoji }}
+					</span>
+				</div>
+				<span class="reaction-preview-label">반응</span>
 			</div>
+			<button
+				type="button"
+				class="reaction-toggle"
+				:aria-label="reactionToggleLabel"
+				:aria-expanded="String(isReactionControlsVisible)"
+				:title="reactionToggleLabel"
+				@click="toggleReactionControls"
+			>
+				<span aria-hidden="true">{{ reactionToggleGlyph }}</span>
+			</button>
 		</div>
-		<button
-			type="button"
-			class="reaction-toggle"
-			:aria-label="reactionToggleLabel"
-			:aria-expanded="String(isReactionControlsVisible)"
-			:title="reactionToggleLabel"
-			@click="toggleReactionControls"
-		>
-			<span aria-hidden="true">{{ reactionToggleGlyph }}</span>
-		</button>
 	</div>
 
 	<div v-if="!isBrowserExporterRoute" class="emoji-stage" :data-background-tone="backgroundTone" aria-hidden="true">
@@ -704,29 +719,29 @@ onUnmounted(() => {
 	right: 12px;
 	bottom: 18px;
 	z-index: 1000;
-	min-width: 36px;
-	min-height: 60px;
 }
 
 .reaction-bar {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	margin-right: 44px;
-	padding: 10px 12px;
+	gap: 0;
 	border: 1px solid rgba(148, 163, 184, 0.2);
 	border-radius: 999px;
 	background: rgba(15, 23, 42, 0.72);
 	backdrop-filter: blur(12px);
 	box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+	overflow: hidden;
+}
+
+.reaction-bar[data-collapsed='true'] {
+	background: rgba(15, 23, 42, 0.64);
 }
 
 .reaction-controls {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding-left: 14px;
-	margin-left: 2px;
+	padding: 10px 12px 10px 14px;
 	border-left: 1px solid rgba(255, 255, 255, 0.16);
 }
 
@@ -747,37 +762,31 @@ onUnmounted(() => {
 }
 
 .reaction-toggle {
-	position: absolute;
-	right: 0;
-	top: 50%;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 36px;
-	height: 36px;
+	align-self: stretch;
+	width: 38px;
 	padding: 0;
-	border: 1px solid rgba(148, 163, 184, 0.22);
-	border-radius: 999px;
-	background: rgba(15, 23, 42, 0.64);
+	border: 0;
+	border-left: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 0;
+	background: rgba(255, 255, 255, 0.08);
 	color: rgba(255, 255, 255, 0.88);
 	font-size: 18px;
 	font-weight: 800;
 	line-height: 1;
 	cursor: pointer;
-	backdrop-filter: blur(12px);
-	box-shadow: 0 8px 22px rgba(15, 23, 42, 0.2);
-	transform: translateY(-50%);
 	transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .reaction-toggle:hover {
-	transform: translateY(calc(-50% - 1px));
-	background: rgba(15, 23, 42, 0.76);
+	background: rgba(255, 255, 255, 0.14);
 	color: white;
 }
 
 .reaction-toggle[aria-expanded='false'] {
-	background: rgba(15, 23, 42, 0.58);
+	background: rgba(255, 255, 255, 0.1);
 	color: rgba(255, 255, 255, 0.82);
 }
 
@@ -787,6 +796,7 @@ onUnmounted(() => {
 	justify-content: center;
 	min-width: 46px;
 	height: 40px;
+	margin: 10px 0 10px 10px;
 	padding: 0 14px;
 	border-radius: 999px;
 	background: rgba(255, 255, 255, 0.18);
@@ -802,6 +812,42 @@ onUnmounted(() => {
 .reaction-download:hover {
 	transform: translateY(-1px) scale(1.03);
 	background: rgba(255, 255, 255, 0.24);
+}
+
+.reaction-preview {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px 10px 14px;
+}
+
+.reaction-preview-icons {
+	display: flex;
+	align-items: center;
+}
+
+.reaction-preview-emoji {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.1);
+	font-size: 14px;
+	box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
+}
+
+.reaction-preview-emoji + .reaction-preview-emoji {
+	margin-left: -6px;
+}
+
+.reaction-preview-label {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.78);
 }
 
 .reaction-toggle:focus-visible,
