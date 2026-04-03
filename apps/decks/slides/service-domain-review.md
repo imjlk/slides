@@ -19,7 +19,7 @@ mdc: true
 # take snapshot for each slide in the overview
 overviewSnapshots: true
 liveReactions:
-  server: wss://slidev-realtime-feedback-do.1990c.workers.dev
+  server: wss://slidev-realtime-feedback-do.imjlk.workers.dev
   okay: 👀
   good: 👍
   great: ❤️
