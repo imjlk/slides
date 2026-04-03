@@ -69,6 +69,7 @@ const { isPresenter, slides, currentPage, queryClicks, go } = useNav()
 const socketState = ref<ConnectionState>(ConnectionState.Connecting)
 const animatedEmojis = ref<AnimatedEmoji[]>([])
 const backgroundTone = ref<'light' | 'dark'>('dark')
+const isReactionControlsVisible = ref(true)
 
 let webSocket: WebSocket | undefined
 let emojiCounter = 0
@@ -101,6 +102,7 @@ const deckPdfHref = isDevEnvironment
 	? '/export/'
 	: `${import.meta.env.BASE_URL}${deckPdfFileName}`
 const deckPdfTitle = isDevEnvironment ? 'Open browser exporter' : 'Download PDF'
+const reactionToggleLabel = computed(() => isReactionControlsVisible.value ? '리액션 접기' : '리액션 펼치기')
 
 function slugify(value: string) {
 	return value
@@ -112,6 +114,10 @@ function slugify(value: string) {
 
 function clamp(value: number, min: number, max: number) {
 	return Math.min(Math.max(value, min), max)
+}
+
+function toggleReactionControls() {
+	isReactionControlsVisible.value = !isReactionControlsVisible.value
 }
 
 function resolvePresentationId() {
@@ -642,29 +648,39 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div v-if="!isPresenter && !isBrowserExporterRoute" class="reaction-bar">
-		<a
-			class="reaction-download"
-			:href="deckPdfHref"
-			:download="isDevEnvironment ? null : deckPdfFileName"
-			:title="deckPdfTitle"
-		>
-			PDF
-		</a>
-		<div class="reaction-controls">
-			<button
-				v-for="(emoji, key) in emojiMap"
-				:key="key"
-				type="button"
-				class="reaction-button"
-				:data-reaction-key="key"
-				:title="`${key} reaction`"
-				@click="sendReaction(key as FeedbackKey)"
+	<div v-if="!isPresenter && !isBrowserExporterRoute" class="reaction-dock">
+		<div class="reaction-bar" :data-collapsed="String(!isReactionControlsVisible)">
+			<a
+				class="reaction-download"
+				:href="deckPdfHref"
+				:download="isDevEnvironment ? null : deckPdfFileName"
+				:title="deckPdfTitle"
 			>
-				{{ emoji }}
-			</button>
-			<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
+				PDF
+			</a>
+			<div v-if="isReactionControlsVisible" class="reaction-controls">
+				<button
+					v-for="(emoji, key) in emojiMap"
+					:key="key"
+					type="button"
+					class="reaction-button"
+					:data-reaction-key="key"
+					:title="`${key} reaction`"
+					@click="sendReaction(key as FeedbackKey)"
+				>
+					{{ emoji }}
+				</button>
+				<span class="reaction-status" :data-state="socketState">{{ socketState }}</span>
+			</div>
 		</div>
+		<button
+			type="button"
+			class="reaction-toggle"
+			:aria-expanded="String(isReactionControlsVisible)"
+			@click="toggleReactionControls"
+		>
+			{{ reactionToggleLabel }}
+		</button>
 	</div>
 
 	<div v-if="!isBrowserExporterRoute" class="emoji-stage" :data-background-tone="backgroundTone" aria-hidden="true">
@@ -680,11 +696,18 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.reaction-bar {
+.reaction-dock {
 	position: fixed;
 	right: 20px;
 	bottom: 18px;
 	z-index: 1000;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+.reaction-bar {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -694,6 +717,10 @@ onUnmounted(() => {
 	background: rgba(15, 23, 42, 0.72);
 	backdrop-filter: blur(12px);
 	box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+}
+
+.reaction-bar[data-collapsed='true'] {
+	padding-right: 10px;
 }
 
 .reaction-controls {
@@ -721,6 +748,36 @@ onUnmounted(() => {
 	background: rgba(255, 255, 255, 0.18);
 }
 
+.reaction-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 30px;
+	padding: 0 12px;
+	border: 1px solid rgba(148, 163, 184, 0.22);
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.58);
+	color: rgba(255, 255, 255, 0.82);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	cursor: pointer;
+	backdrop-filter: blur(12px);
+	box-shadow: 0 6px 18px rgba(15, 23, 42, 0.16);
+	transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.reaction-toggle:hover {
+	transform: translateY(-1px);
+	background: rgba(15, 23, 42, 0.68);
+	color: white;
+}
+
+.reaction-toggle[aria-expanded='false'] {
+	background: rgba(15, 23, 42, 0.5);
+	color: rgba(255, 255, 255, 0.72);
+}
+
 .reaction-download {
 	display: inline-flex;
 	align-items: center;
@@ -744,8 +801,15 @@ onUnmounted(() => {
 	background: rgba(255, 255, 255, 0.24);
 }
 
+.reaction-toggle:focus-visible,
+.reaction-button:focus-visible,
+.reaction-download:focus-visible {
+	outline: 2px solid rgba(255, 255, 255, 0.64);
+	outline-offset: 2px;
+}
+
 @media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
-	.reaction-bar {
+	.reaction-dock {
 		right: 16px;
 		bottom: 14px;
 	}
@@ -853,7 +917,9 @@ onUnmounted(() => {
 
 <style>
 @media print {
+	.reaction-dock,
 	.reaction-bar,
+	.reaction-toggle,
 	.emoji-stage {
 		display: none !important;
 	}
